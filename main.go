@@ -1,12 +1,10 @@
 // go-callvis: a tool to help visualize the call graph of a Go program.
-//
 package main
 
 import (
 	"flag"
 	"fmt"
 	"go/build"
-	"io/ioutil"
 	"log"
 	"net"
 	"net/http"
@@ -105,7 +103,7 @@ func outputDot(fname string, outputFormat string) {
 
 	log.Println("writing dot output..")
 
-	writeErr := ioutil.WriteFile(fmt.Sprintf("%s.gv", fname), output, 0755)
+	writeErr := os.WriteFile(fmt.Sprintf("%s.gv", fname), output, 0755)
 	if writeErr != nil {
 		log.Fatalf("%v\n", writeErr)
 	}
@@ -118,7 +116,7 @@ func outputDot(fname string, outputFormat string) {
 	}
 }
 
-//noinspection GoUnhandledErrorResult
+// noinspection GoUnhandledErrorResult
 func main() {
 	flag.Parse()
 
