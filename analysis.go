@@ -1,25 +1,36 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/config"
+	"github.com/go-git/go-git/v5/plumbing"
+	"github.com/google/go-github/v57/github"
+	ghdiff "github.com/kmesiab/go-github-diff"
 	"go/build"
+	"go/parser"
+	"go/token"
 	"go/types"
 	"golang.org/x/tools/go/callgraph"
 	"golang.org/x/tools/go/callgraph/cha"
 	"golang.org/x/tools/go/callgraph/rta"
 	"golang.org/x/tools/go/callgraph/static"
-	"io"
-	"log"
-	"net/http"
-	"os"
-	"path/filepath"
-	"strings"
-
 	"golang.org/x/tools/go/packages"
 	"golang.org/x/tools/go/pointer"
 	"golang.org/x/tools/go/ssa"
 	"golang.org/x/tools/go/ssa/ssautil"
+	"hash/fnv"
+	"io"
+	"log"
+	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"strconv"
+	"strings"
 )
 
 type CallGraphType string
@@ -31,7 +42,7 @@ const (
 	CallGraphTypePointer               = "pointer"
 )
 
-//==[ type def/func: analysis   ]===============================================
+// ==[ type def/func: analysis   ]===============================================
 type renderOpts struct {
 	cacheDir string
 	focus    string
@@ -60,13 +71,25 @@ func mainPackages(pkgs []*ssa.Package) ([]*ssa.Package, error) {
 	return mains, nil
 }
 
-//==[ type def/func: analysis   ]===============================================
+// ==[ type def/func: analysis   ]===============================================
 type analysis struct {
-	opts      *renderOpts
-	prog      *ssa.Program
-	pkgs      []*ssa.Package
-	mainPkg   *ssa.Package
-	callgraph *callgraph.Graph
+	opts              *renderOpts
+	prog              *ssa.Program
+	pkgs              []*ssa.Package
+	mainPkg           *ssa.Package
+	callgraph         *callgraph.Graph
+	modifyPackages    map[packageInfo]modifyFunctions
+	influencePackages map[string]string
+}
+
+type packageInfo struct {
+	name       string
+	importPath string
+}
+
+type modifyFunctions struct {
+	importPath string
+	functions  []string
 }
 
 var Analysis *analysis
@@ -390,5 +413,167 @@ func getBuildFlagTags(buildTags []string) string {
 		return "-tags=" + strings.Join(buildTags, ",")
 	}
 
+	return ""
+}
+func hash(s string) string {
+	h := fnv.New32a()
+	h.Write([]byte(s))
+	return strconv.FormatUint(uint64(h.Sum32()), 10)
+}
+
+func (a *analysis) checkout(cloneURL, repo, commit string) error {
+	r, err := git.PlainOpen(".")
+	if err != nil {
+		return err
+	}
+
+	logf("git show-ref --head HEAD")
+	ref, err := r.Head()
+	if err != nil {
+		return err
+	}
+	fmt.Println(ref.Hash())
+
+	_, err = r.CreateRemote(&config.RemoteConfig{
+		Name: hash(fmt.Sprintf(commit)),
+		URLs: []string{cloneURL},
+	})
+	if err := r.Fetch(&git.FetchOptions{
+		RemoteName: hash(fmt.Sprintf(commit)),
+	}); err != nil {
+		return err
+	}
+
+	w, err := r.Worktree()
+	if err != nil {
+		return err
+	}
+
+	logf("git checkout %s", commit)
+	err = w.Checkout(&git.CheckoutOptions{
+		Hash: plumbing.NewHash(commit),
+	})
+	if err != nil {
+		return err
+	}
+	logf("git show-ref --head HEAD")
+	ref, err = r.Head()
+	if err != nil {
+		return err
+	}
+	fmt.Println(ref.Hash())
+	return nil
+}
+
+func (a *analysis) parseInfluencePackages() error {
+	cmd := exec.Command("go", "list", "-f", "\"{{.ImportPath}} {{.Imports}}\"", "./...")
+	var out strings.Builder
+	cmd.Stdout = &out
+	err := cmd.Run()
+	if err != nil {
+		return err
+	}
+	a.influencePackages = make(map[string]string)
+	logf("go list all import package %v", out.String())
+
+	lines := strings.Split(out.String(), "\n")
+	//completeImportPackages := make(map[string])
+	for _, line := range lines {
+		re := regexp.MustCompile(`(\S+)\s+(.*)`)
+		fmt.Println(line, re)
+
+		matches := re.FindStringSubmatch(line[1 : len(line)-1])
+		if len(matches) > 0 {
+			//url := matches[1]
+			//bracketContent := matches[2]
+
+		}
+
+	}
+	return nil
+}
+
+func (a *analysis) parsePR(urlStr, repo string) error {
+	url, _ := ghdiff.ParsePullRequestURL(urlStr)
+	client := github.NewClient(nil)
+	githubToken := os.Getenv("GITHUB_TOKEN")
+	if githubToken != "" {
+		client = client.WithAuthToken(githubToken)
+	}
+	ghClient := ghdiff.GitHubClientWrapper{Client: client}
+	details, err := ghdiff.GetPullRequestWithDetails(context.TODO(), url, &ghClient)
+	if err != nil {
+		return err
+	}
+	cloneURL, commit := *details.Head.Repo.CloneURL, *details.Head.SHA
+	if err = a.checkout(cloneURL, repo, commit); err != nil {
+		return err
+	}
+	prString, err := ghdiff.GetPullRequestWithClient(context.TODO(), url, &ghClient)
+	if err != nil {
+		fmt.Printf("Error getting pull request: %s\n", err)
+		return err
+	}
+	ignoreList := []string{".mod", "_test.go", ".bazedl"}
+	diffFiles := ghdiff.ParseGitDiff(prString, ignoreList)
+	a.modifyPackages = make(map[packageInfo]modifyFunctions)
+	for _, diffFile := range diffFiles {
+		logf("modify file old file path \"%v\", new file path \"%v\"\n", diffFile.FilePathOld, diffFile.FilePathNew)
+		functions := parseDiffContentsGetModifyFunctions(diffFile.DiffContents)
+		logf("modify modifyPackages %v\n", functions)
+		fset := token.NewFileSet()
+		node, err2 := parser.ParseFile(fset, "./"+strings.TrimLeft(diffFile.FilePathNew, "b/"), nil, parser.PackageClauseOnly)
+		var pkgName string
+		if err2 != nil {
+			logf("parse file get error %v", err2)
+			for _, line := range strings.Split(diffFile.DiffContents, "\n") {
+				if strings.Contains(line, "-package ") {
+					pkgName = strings.TrimLeft(line, "-package ")
+					break
+				}
+			}
+		} else {
+			pkgName = node.Name.String()
+		}
+
+		logf("Package name %v", pkgName)
+
+		var importPath string
+		for i, s := range strings.Split("github.com/pingcap/"+repo+"/"+strings.TrimLeft(diffFile.FilePathNew, "b/"), "/") {
+			if i == len(strings.Split("github.com/pingcap/"+repo+"/"+strings.TrimLeft(diffFile.FilePathNew, "b/"), "/"))-1 {
+				break
+			}
+			importPath += s + "/"
+		}
+		importPath = importPath[:len(importPath)-1]
+		if v, ok := a.modifyPackages[packageInfo{name: pkgName, importPath: importPath}]; !ok {
+			a.modifyPackages[packageInfo{name: pkgName, importPath: importPath}] = modifyFunctions{importPath: importPath, functions: functions}
+		} else {
+			a.modifyPackages[packageInfo{name: pkgName, importPath: importPath}] = modifyFunctions{importPath: importPath, functions: append(v.functions, functions...)}
+		}
+	}
+	return nil
+}
+
+func parseDiffContentsGetModifyFunctions(diffContents string) []string {
+	var functions []string
+	lines := strings.Split(diffContents, "\n")
+	for _, line := range lines {
+		if strings.Contains(line, " func") {
+			logf("compile %s\n", line)
+			functions = append(functions, extractFuncName(line))
+		}
+	}
+	return functions
+}
+
+func extractFuncName(s string) string {
+	re := regexp.MustCompile(`func\s*(?:\(\w+\s*\*?\s*\w+\)\s*)?(\w+)\(`)
+	match := re.FindStringSubmatch(s)
+	if len(match) > 1 {
+		return match[1]
+	} else {
+		logf("%s can not compile\n", s)
+	}
 	return ""
 }
