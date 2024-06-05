@@ -4,7 +4,9 @@ package main
 import (
 	"flag"
 	"fmt"
+	log2 "github.com/pingcap/log"
 	"github.com/pkg/browser"
+	"go.uber.org/zap"
 	"go/build"
 	"golang.org/x/tools/go/buildutil"
 	"log"
@@ -28,7 +30,7 @@ Flags:
 `
 
 var (
-	focusFlag     = flag.String("focus", "main", "Focus specific package using name or import path.")
+	focusFlag     = flag.String("focus", "main", "Focus specific package using pkgName or import path.")
 	groupFlag     = flag.String("group", "pkg", "Grouping modifyPackages by packages and/or types [pkg, type] (separated by comma)")
 	limitFlag     = flag.String("limit", "", "Limit package paths to given prefixes (separated by comma)")
 	ignoreFlag    = flag.String("ignore", "", "Ignore package paths containing given prefixes (separated by comma)")
@@ -49,7 +51,7 @@ var (
 	versionFlag  = flag.Bool("version", false, "Show version and exit.")
 	parseSVGFlag = flag.Bool("parseSVG", false, "parse svg file")
 	prURL        = flag.String("prURL", "", "github pr url")
-	repo         = flag.String("repo", "", "github repo name")
+	repo         = flag.String("repo", "", "github repo pkgName")
 )
 
 func init() {
@@ -149,17 +151,45 @@ func main() {
 		if err := Analysis.parseInfluencePackages(); err != nil {
 			log.Fatal(err)
 		}
-
+		//var tmp string
+		//for k := range Analysis.modifyPackages {
+		//	tmp += fmt.Sprintf("%s,", k.importPath)
+		//}
+		//for k := range Analysis.influencePackages {
+		//	tmp += fmt.Sprintf("%s,", k.importPath)
+		//}
+		//*focusFlag = tmp[:len(tmp)-1]
+		//args = []string{*focusFlag}
+		//if err := Analysis.DoAnalysis(CallGraphType(*callgraphAlgo), "", tests, args); err != nil {
+		//	log.Fatal(err)
+		//}
+		//
+		//outputDot(*focusFlag, *outputFormat)
+		//
 		for pkgInfo, v := range Analysis.modifyPackages {
-			logf("pkgName %v, functions %v", pkgInfo.name, v)
-			*focusFlag = pkgInfo.name
+			log2.Info("analyze modify package", zap.String("pkg name", pkgInfo.pkgName), zap.String("path", pkgInfo.importPath), zap.Strings("functions", v.functions))
+			*focusFlag = pkgInfo.pkgName
 			args = []string{pkgInfo.importPath}
 			if err := Analysis.DoAnalysis(CallGraphType(*callgraphAlgo), "", tests, args); err != nil {
 				log.Fatal(err)
 				continue
 			}
-
 			outputDot(*focusFlag, *outputFormat)
+
+		}
+		//
+		for pkgInfo := range Analysis.influencePackages {
+			log2.Info("analyze influence package", zap.String("pkg name", pkgInfo.pkgName), zap.String("path", pkgInfo.importPath))
+			*focusFlag = pkgInfo.pkgName
+			args = []string{pkgInfo.importPath}
+			if false {
+				if err := Analysis.DoAnalysis(CallGraphType(*callgraphAlgo), "", tests, args); err != nil {
+					log.Fatal(err)
+					continue
+				}
+				outputDot(*focusFlag, *outputFormat)
+			}
+
 		}
 	} else {
 		if err := Analysis.DoAnalysis(CallGraphType(*callgraphAlgo), "", tests, args); err != nil {

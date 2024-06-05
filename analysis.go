@@ -9,6 +9,8 @@ import (
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/google/go-github/v57/github"
 	ghdiff "github.com/kmesiab/go-github-diff"
+	"github.com/pingcap/log"
+	"go.uber.org/zap"
 	"go/build"
 	"go/parser"
 	"go/token"
@@ -23,7 +25,6 @@ import (
 	"golang.org/x/tools/go/ssa/ssautil"
 	"hash/fnv"
 	"io"
-	"log"
 	"net/http"
 	"os"
 	"os/exec"
@@ -79,17 +80,16 @@ type analysis struct {
 	mainPkg           *ssa.Package
 	callgraph         *callgraph.Graph
 	modifyPackages    map[packageInfo]modifyFunctions
-	influencePackages map[string]string
+	influencePackages map[packageInfo]struct{}
 }
 
 type packageInfo struct {
-	name       string
+	pkgName    string
 	importPath string
 }
 
 type modifyFunctions struct {
-	importPath string
-	functions  []string
+	functions []string
 }
 
 var Analysis *analysis
@@ -271,7 +271,7 @@ func (a *analysis) Render() ([]byte, error) {
 			if strings.Contains(a.opts.focus, "/") {
 				return nil, fmt.Errorf("focus failed: %v", err)
 			}
-			// try to find package by name
+			// try to find package by pkgName
 			var foundPaths []string
 			for _, p := range a.pkgs {
 				if p.Pkg.Name() == a.opts.focus {
@@ -284,7 +284,7 @@ func (a *analysis) Render() ([]byte, error) {
 				for _, p := range foundPaths {
 					fmt.Fprintf(os.Stderr, " - %s\n", p)
 				}
-				return nil, fmt.Errorf("focus failed, found multiple packages with name: %v", a.opts.focus)
+				return nil, fmt.Errorf("focus failed, found multiple packages with pkgName: %v", a.opts.focus)
 			}
 			// found single package
 			if ssaPkg = a.prog.ImportedPackage(foundPaths[0]); ssaPkg == nil {
@@ -327,11 +327,11 @@ func (a *analysis) FindCachedImg() string {
 	absFilePath := filepath.Join(a.opts.cacheDir, focusFilePath)
 
 	if exists, err := pathExists(absFilePath); err != nil || !exists {
-		log.Println("not cached img:", absFilePath)
+		logf("not cached img: %v", absFilePath)
 		return ""
 	}
 
-	log.Println("hit cached img")
+	logf("hit cached img")
 	return absFilePath
 }
 
@@ -473,22 +473,35 @@ func (a *analysis) parseInfluencePackages() error {
 	if err != nil {
 		return err
 	}
-	a.influencePackages = make(map[string]string)
-	logf("go list all import package %v", out.String())
-
+	a.influencePackages = make(map[packageInfo]struct{})
+	//log.Info("go list all import package", zap.String("package list", out.String()))
 	lines := strings.Split(out.String(), "\n")
-	//completeImportPackages := make(map[string])
 	for _, line := range lines {
+		if len(line) == 0 {
+			continue
+		}
 		re := regexp.MustCompile(`(\S+)\s+(.*)`)
-		fmt.Println(line, re)
-
 		matches := re.FindStringSubmatch(line[1 : len(line)-1])
 		if len(matches) > 0 {
-			//url := matches[1]
-			//bracketContent := matches[2]
-
+			url := matches[1]
+			pkgName := strings.Split(url, "/")[len(strings.Split(url, "/"))-1]
+			importPkgPaths := strings.Split(matches[2][1:len(matches[2])-1], " ")
+			if pkgName == "tidb-server" {
+				pkgName = "main"
+			}
+			for _, importPkgPath := range importPkgPaths {
+				for k := range a.modifyPackages {
+					if k.importPath == importPkgPath {
+						if _, ok := a.influencePackages[packageInfo{pkgName: pkgName, importPath: url}]; ok {
+							log.Info("duplicate influence package", zap.String("url", url), zap.String("pkg pkgName", pkgName), zap.String("cause pkg", importPkgPath))
+						} else {
+							log.Info("potential influence package", zap.String("url", url), zap.String("pkg pkgName", pkgName), zap.String("cause pkg", importPkgPath))
+							a.influencePackages[packageInfo{pkgName: pkgName, importPath: url}] = struct{}{}
+						}
+					}
+				}
+			}
 		}
-
 	}
 	return nil
 }
@@ -511,32 +524,30 @@ func (a *analysis) parsePR(urlStr, repo string) error {
 	}
 	prString, err := ghdiff.GetPullRequestWithClient(context.TODO(), url, &ghClient)
 	if err != nil {
-		fmt.Printf("Error getting pull request: %s\n", err)
+		log.Info("Error getting pull request", zap.Error(err))
 		return err
 	}
-	ignoreList := []string{".mod", "_test.go", ".bazedl"}
+	ignoreList := []string{".mod", "_test.go", ".bazel"}
 	diffFiles := ghdiff.ParseGitDiff(prString, ignoreList)
 	a.modifyPackages = make(map[packageInfo]modifyFunctions)
 	for _, diffFile := range diffFiles {
-		logf("modify file old file path \"%v\", new file path \"%v\"\n", diffFile.FilePathOld, diffFile.FilePathNew)
+		log.Info("modify file path", zap.String("old", diffFile.FilePathOld), zap.String("new", diffFile.FilePathNew))
 		functions := parseDiffContentsGetModifyFunctions(diffFile.DiffContents)
-		logf("modify modifyPackages %v\n", functions)
+		log.Info("parse diff contents get modify functions", zap.Strings("functions", functions))
 		fset := token.NewFileSet()
 		node, err2 := parser.ParseFile(fset, "./"+strings.TrimLeft(diffFile.FilePathNew, "b/"), nil, parser.PackageClauseOnly)
 		var pkgName string
 		if err2 != nil {
-			logf("parse file get error %v", err2)
+			log.Warn("parse file get error", zap.Error(err2))
 			for _, line := range strings.Split(diffFile.DiffContents, "\n") {
 				if strings.Contains(line, "-package ") {
-					pkgName = strings.TrimLeft(line, "-package ")
+					pkgName = strings.TrimPrefix(line, "-package ")
 					break
 				}
 			}
 		} else {
 			pkgName = node.Name.String()
 		}
-
-		logf("Package name %v", pkgName)
 
 		var importPath string
 		for i, s := range strings.Split("github.com/pingcap/"+repo+"/"+strings.TrimLeft(diffFile.FilePathNew, "b/"), "/") {
@@ -546,11 +557,15 @@ func (a *analysis) parsePR(urlStr, repo string) error {
 			importPath += s + "/"
 		}
 		importPath = importPath[:len(importPath)-1]
-		if v, ok := a.modifyPackages[packageInfo{name: pkgName, importPath: importPath}]; !ok {
-			a.modifyPackages[packageInfo{name: pkgName, importPath: importPath}] = modifyFunctions{importPath: importPath, functions: functions}
-		} else {
-			a.modifyPackages[packageInfo{name: pkgName, importPath: importPath}] = modifyFunctions{importPath: importPath, functions: append(v.functions, functions...)}
+		if pkgName == "tidb-server" {
+			pkgName = "main"
 		}
+		if v, ok := a.modifyPackages[packageInfo{pkgName: pkgName, importPath: importPath}]; !ok {
+			a.modifyPackages[packageInfo{pkgName: pkgName, importPath: importPath}] = modifyFunctions{functions: functions}
+		} else {
+			a.modifyPackages[packageInfo{pkgName: pkgName, importPath: importPath}] = modifyFunctions{functions: append(v.functions, functions...)}
+		}
+		log.Info("update modify packages", zap.String("pkg pkgName", pkgName), zap.String("import path", importPath), zap.Strings("functions", a.modifyPackages[packageInfo{pkgName: pkgName, importPath: importPath}].functions))
 	}
 	return nil
 }
@@ -560,7 +575,7 @@ func parseDiffContentsGetModifyFunctions(diffContents string) []string {
 	lines := strings.Split(diffContents, "\n")
 	for _, line := range lines {
 		if strings.Contains(line, " func") {
-			logf("compile %s\n", line)
+			log.Info("compile context", zap.String("context", line))
 			functions = append(functions, extractFuncName(line))
 		}
 	}

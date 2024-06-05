@@ -204,6 +204,21 @@ func printOutput(
 		//var buf bytes.Buffer
 		//data, _ := json.MarshalIndent(caller.Func, "", " ")
 		//logf("call node: %s -> %s\n %v", caller, callee, string(data))
+		ignore := true
+		for k, v := range Analysis.modifyPackages {
+			if strings.Contains(callee.Func.Pkg.String(), k.importPath) {
+				for _, function := range v.functions {
+					if strings.Contains(callee.String(), function) {
+						ignore = false
+						break
+					}
+				}
+				break
+			}
+		}
+		if ignore {
+			return nil
+		}
 		logf("call node: %s -> %s (%s -> %s) %v\n", caller.Func.Pkg, callee.Func.Pkg, caller, callee, filenameCaller)
 
 		var sprintNode = func(node *callgraph.Node, isCaller bool) *dotNode {
@@ -254,7 +269,7 @@ func printOutput(
 				attrs["fillcolor"] = "moccasin"
 			}
 
-			// include pkg name
+			// include pkg pkgName
 			if !groupPkg && !isFocused {
 				label = fmt.Sprintf("%s\n%s", node.Func.Pkg.Pkg.Name(), label)
 			}
