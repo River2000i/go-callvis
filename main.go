@@ -4,17 +4,17 @@ package main
 import (
 	"flag"
 	"fmt"
-	log2 "github.com/pingcap/log"
-	"github.com/pkg/browser"
-	"go.uber.org/zap"
 	"go/build"
-	"golang.org/x/tools/go/buildutil"
 	"log"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 	"time"
+
+	"github.com/pkg/browser"
+	"golang.org/x/tools/go/buildutil"
 )
 
 const Usage = `go-callvis: visualize call graph of a Go program.
@@ -30,7 +30,7 @@ Flags:
 `
 
 var (
-	focusFlag     = flag.String("focus", "main", "Focus specific package using pkgName or import path.")
+	focusFlag     = flag.String("focus", "", "Focus specific package using pkgName or import path.")
 	groupFlag     = flag.String("group", "pkg", "Grouping modifyPackages by packages and/or types [pkg, type] (separated by comma)")
 	limitFlag     = flag.String("limit", "", "Limit package paths to given prefixes (separated by comma)")
 	ignoreFlag    = flag.String("ignore", "", "Ignore package paths containing given prefixes (separated by comma)")
@@ -47,17 +47,17 @@ var (
 	callgraphAlgo = flag.String("algo", CallGraphTypePointer, fmt.Sprintf("The algorithm used to construct the call graph. Possible values inlcude: %q, %q, %q, %q",
 		CallGraphTypeStatic, CallGraphTypeCha, CallGraphTypeRta, CallGraphTypePointer))
 
-	debugFlag    = flag.Bool("debug", false, "Enable verbose log.")
-	versionFlag  = flag.Bool("version", false, "Show version and exit.")
-	parseSVGFlag = flag.Bool("parseSVG", false, "parse svg file")
-	prURL        = flag.String("prURL", "", "github pr url")
-	repo         = flag.String("repo", "", "github repo pkgName")
+	debugFlag   = flag.Bool("debug", false, "Enable verbose log.")
+	versionFlag = flag.Bool("version", false, "Show version and exit.")
+	prURL       = flag.String("prURL", "", "github pr url")
+	repo        = flag.String("repo", "", "github repo pkgName")
+	dryRun      = flag.Bool("dryRun", false, "dry run")
 )
 
 func init() {
 	flag.Var((*buildutil.TagsFlag)(&build.Default.BuildTags), "tags", buildutil.TagsFlagDoc)
 	// Graphviz options
-	flag.UintVar(&minlen, "minlen", 5, "Minimum edge length (for wider output).")
+	flag.UintVar(&minlen, "minlen", 2, "Minimum edge length (for wider output).")
 	flag.Float64Var(&nodesep, "nodesep", 0.5, "Minimum space between two adjacent nodes in the same rank (for taller output).")
 	flag.StringVar(&nodeshape, "nodeshape", "box", "graph node shape (see graphvis manpage for valid values)")
 	flag.StringVar(&nodestyle, "nodestyle", "filled,rounded", "graph node style (see graphvis manpage for valid values)")
@@ -102,9 +102,10 @@ func outputDot(fname string, outputFormat string) {
 
 	output, err := Analysis.Render()
 	if err != nil {
-		log.Fatalf("%v\n", err)
+		log.Printf("%v\n", err)
+		return
 	}
-
+	return
 	log.Println("writing dot output..")
 
 	writeErr := os.WriteFile(fmt.Sprintf("%s.gv", fname), output, 0755)
@@ -120,7 +121,23 @@ func outputDot(fname string, outputFormat string) {
 	}
 }
 
-// noinspection GoUnhandledErrorResult
+func callEdgeDFS(funcInfo functionInfo, set map[functionInfo]struct{}, s string) {
+	if callerFuncs, ok := Analysis.funcInfo[funcInfo]; ok {
+		for k := range callerFuncs {
+			if _, ok := set[k]; ok {
+				logf("%s", s)
+				continue
+			}
+			set[k] = struct{}{}
+			callEdgeDFS(k, set, fmt.Sprintf("%s<-%s.(%s)", s, k.importPath, k.functionName))
+			delete(set, k)
+		}
+	} else {
+		logf("%s", s)
+		return
+	}
+}
+
 func main() {
 	flag.Parse()
 
@@ -144,6 +161,8 @@ func main() {
 	urlAddr := parseHTTPAddr(httpAddr)
 
 	Analysis = new(analysis)
+	Analysis.influenceFunctions = make(map[packageInfo]map[string]struct{})
+	Analysis.funcInfo = make(map[functionInfo]map[functionInfo]struct{})
 	if *prURL != "" {
 		if err := Analysis.parsePR(*prURL, *repo); err != nil {
 			log.Fatal(err)
@@ -151,46 +170,62 @@ func main() {
 		if err := Analysis.parseInfluencePackages(); err != nil {
 			log.Fatal(err)
 		}
-		//var tmp string
-		//for k := range Analysis.modifyPackages {
-		//	tmp += fmt.Sprintf("%s,", k.importPath)
-		//}
-		//for k := range Analysis.influencePackages {
-		//	tmp += fmt.Sprintf("%s,", k.importPath)
-		//}
-		//*focusFlag = tmp[:len(tmp)-1]
-		//args = []string{*focusFlag}
-		//if err := Analysis.DoAnalysis(CallGraphType(*callgraphAlgo), "", tests, args); err != nil {
-		//	log.Fatal(err)
-		//}
-		//
-		//outputDot(*focusFlag, *outputFormat)
-		//
 		for pkgInfo, v := range Analysis.modifyPackages {
-			log2.Info("analyze modify package", zap.String("pkg name", pkgInfo.pkgName), zap.String("path", pkgInfo.importPath), zap.Strings("functions", v.functions))
-			*focusFlag = pkgInfo.pkgName
-			args = []string{pkgInfo.importPath}
-			if err := Analysis.DoAnalysis(CallGraphType(*callgraphAlgo), "", tests, args); err != nil {
-				log.Fatal(err)
-				continue
+			if _, ok := Analysis.influenceFunctions[pkgInfo]; !ok {
+				Analysis.influenceFunctions[pkgInfo] = make(map[string]struct{})
 			}
-			outputDot(*focusFlag, *outputFormat)
-
-		}
-		//
-		for pkgInfo := range Analysis.influencePackages {
-			log2.Info("analyze influence package", zap.String("pkg name", pkgInfo.pkgName), zap.String("path", pkgInfo.importPath))
-			*focusFlag = pkgInfo.pkgName
-			args = []string{pkgInfo.importPath}
-			if false {
-				if err := Analysis.DoAnalysis(CallGraphType(*callgraphAlgo), "", tests, args); err != nil {
-					log.Fatal(err)
-					continue
+			for _, f := range v.functions {
+				if _, ok := Analysis.influenceFunctions[pkgInfo][f]; !ok {
+					Analysis.influenceFunctions[pkgInfo][f] = struct{}{}
 				}
-				outputDot(*focusFlag, *outputFormat)
 			}
-
 		}
+
+		queue := Analysis.influencePackagesRoot.next
+		set := make(map[string]struct{})
+		args = []string{}
+		for {
+			length := len(set)
+			for _, pkg := range queue {
+				if _, ok := set[pkg.pkgName.importPath]; !ok {
+					args = append(args, pkg.pkgName.importPath)
+					set[pkg.pkgName.importPath] = struct{}{}
+				}
+			}
+			if length == len(set) {
+				break
+			}
+			length = len(queue)
+			for _, pkgs := range queue {
+				for _, pkg := range pkgs.next {
+					if _, ok := set[pkg.pkgName.importPath]; !ok {
+						queue = append(queue, pkg)
+					}
+				}
+			}
+			queue = queue[length:]
+		}
+		// args = []string{"github.com/pingcap/tidb/pkg/meta", "github.com/pingcap/tidb/pkg/ddl"}
+		if err := Analysis.DoAnalysis(CallGraphType(*callgraphAlgo), "", tests, args); err != nil {
+			log.Fatal(err)
+		}
+
+		outputDot(time.Now().GoString(), *outputFormat)
+		for k, v := range Analysis.funcInfo {
+			s := fmt.Sprintf("%s.(%s) contain: ", k.importPath, k.functionName)
+			for k2 := range v {
+				s = fmt.Sprintf("%s, %s.(%s)", s, k2.importPath, k2.functionName)
+			}
+			fmt.Println(s)
+		}
+
+		for k, functions := range Analysis.influenceFunctions {
+			for f := range functions {
+				set := make(map[functionInfo]struct{})
+				callEdgeDFS(functionInfo{importPath: k.importPath, functionName: f}, set, fmt.Sprintf("%s.(%s)", k.importPath, f))
+			}
+		}
+
 	} else {
 		if err := Analysis.DoAnalysis(CallGraphType(*callgraphAlgo), "", tests, args); err != nil {
 			log.Fatal(err)
@@ -210,4 +245,12 @@ func main() {
 			outputDot(*outputFile, *outputFormat)
 		}
 	}
+}
+
+func getPkgName(importPath string) string {
+	pkgName := strings.Split(importPath, "/")[len(strings.Split(importPath, "/"))-1]
+	if pkgName == "tidb-server" || pkgName == "dumpling" || pkgName == "tidb-lightning" {
+		pkgName = "main"
+	}
+	return pkgName
 }

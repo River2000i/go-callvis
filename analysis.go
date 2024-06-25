@@ -2,27 +2,13 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
-	"github.com/go-git/go-git/v5"
-	"github.com/go-git/go-git/v5/config"
-	"github.com/go-git/go-git/v5/plumbing"
-	"github.com/google/go-github/v57/github"
-	ghdiff "github.com/kmesiab/go-github-diff"
-	"github.com/pingcap/log"
-	"go.uber.org/zap"
 	"go/build"
 	"go/parser"
 	"go/token"
 	"go/types"
-	"golang.org/x/tools/go/callgraph"
-	"golang.org/x/tools/go/callgraph/cha"
-	"golang.org/x/tools/go/callgraph/rta"
-	"golang.org/x/tools/go/callgraph/static"
-	"golang.org/x/tools/go/packages"
-	"golang.org/x/tools/go/pointer"
-	"golang.org/x/tools/go/ssa"
-	"golang.org/x/tools/go/ssa/ssautil"
 	"hash/fnv"
 	"io"
 	"net/http"
@@ -32,6 +18,22 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/config"
+	"github.com/go-git/go-git/v5/plumbing"
+	"github.com/google/go-github/v57/github"
+	ghdiff "github.com/kmesiab/go-github-diff"
+	"github.com/pingcap/log"
+	"go.uber.org/zap"
+	"golang.org/x/tools/go/callgraph"
+	"golang.org/x/tools/go/callgraph/cha"
+	"golang.org/x/tools/go/callgraph/rta"
+	"golang.org/x/tools/go/callgraph/static"
+	"golang.org/x/tools/go/packages"
+	"golang.org/x/tools/go/pointer"
+	"golang.org/x/tools/go/ssa"
+	"golang.org/x/tools/go/ssa/ssautil"
 )
 
 type CallGraphType string
@@ -45,16 +47,18 @@ const (
 
 // ==[ type def/func: analysis   ]===============================================
 type renderOpts struct {
-	cacheDir string
-	focus    string
-	group    []string
-	ignore   []string
-	include  []string
-	limit    []string
-	nointer  bool
-	refresh  bool
-	nostd    bool
-	algo     CallGraphType
+	cacheDir         string
+	focus            string
+	group            []string
+	ignore           []string
+	include          []string
+	limit            []string
+	nointer          bool
+	refresh          bool
+	nostd            bool
+	algo             CallGraphType
+	modifyPackage    bool
+	influencePackage bool
 }
 
 // mainPackages returns the main packages to analyze.
@@ -74,13 +78,17 @@ func mainPackages(pkgs []*ssa.Package) ([]*ssa.Package, error) {
 
 // ==[ type def/func: analysis   ]===============================================
 type analysis struct {
-	opts              *renderOpts
-	prog              *ssa.Program
-	pkgs              []*ssa.Package
-	mainPkg           *ssa.Package
-	callgraph         *callgraph.Graph
-	modifyPackages    map[packageInfo]modifyFunctions
-	influencePackages map[packageInfo]struct{}
+	opts                  *renderOpts
+	prog                  *ssa.Program
+	pkgs                  []*ssa.Package
+	mainPkg               *ssa.Package
+	callgraph             *callgraph.Graph
+	modifyPackages        map[packageInfo]modifyFunctions
+	influenceFunctions    map[packageInfo]map[string]struct{}
+	influencePackagesRoot *goListNode
+	prCommit              string
+	goList                map[packageInfo]map[string]struct{}
+	funcInfo              map[functionInfo]map[functionInfo]struct{}
 }
 
 type packageInfo struct {
@@ -225,6 +233,60 @@ func (a *analysis) ProcessListArgs() (e error) {
 	a.opts.limit = limitPaths
 
 	return
+}
+
+func getDB() (*sql.DB, error) {
+	dsnTmp := "%s:%s@tcp(%s:%s)/%s"
+	db, err := sql.Open("mysql", fmt.Sprintf(dsnTmp,
+		os.Getenv("user"), os.Getenv("password"), os.Getenv("host"), os.Getenv("port"), os.Getenv("dbname")))
+	return db, err
+}
+
+func DbExecuteWithoutLog(ctx context.Context, query string, args ...interface{}) (int64, error) {
+	db, err := getDB()
+	if err != nil {
+		return 0, err
+	}
+	defer db.Close()
+	_, err = db.ExecContext(ctx, "set @@time_zone = 'UTC';")
+	if err != nil && !errors.Is(err, context.Canceled) {
+		return 0, err
+	}
+	ret, err := db.ExecContext(ctx, query, args...)
+	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			return 0, nil
+		} else {
+			return 0, err
+		}
+	}
+	if strings.HasPrefix(query, "insert") {
+		return ret.LastInsertId()
+	} else {
+		return 0, err
+	}
+}
+
+func commitAnalyzeDone(branch, commit string) (bool, error) {
+	db, err := getDB()
+	if err != nil {
+		return false, err
+	}
+	defer db.Close()
+	_, err = db.Exec("set @@time_zone = 'UTC';")
+	if err != nil {
+		return false, err
+	}
+	row, err := db.Query(fmt.Sprintf("select id from done_pr where branch = \"%s\" and pr_commit = \"%s\"", branch, commit))
+
+	if err != nil {
+		return false, err
+	}
+	if row.Next() {
+		return true, nil
+	} else {
+		return false, nil
+	}
 }
 
 func (a *analysis) OverrideByHTTP(r *http.Request) {
@@ -432,15 +494,17 @@ func (a *analysis) checkout(cloneURL, repo, commit string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Println(ref.Hash())
+	logf("git head ref %v", ref.Hash())
 
-	_, err = r.CreateRemote(&config.RemoteConfig{
-		Name: hash(fmt.Sprintf(commit)),
+	if _, err = r.CreateRemote(&config.RemoteConfig{
+		Name: hash(commit),
 		URLs: []string{cloneURL},
-	})
-	if err := r.Fetch(&git.FetchOptions{
-		RemoteName: hash(fmt.Sprintf(commit)),
 	}); err != nil {
+		logf("create remote failue since %v", err)
+	}
+	if err := r.Fetch(&git.FetchOptions{
+		RemoteName: hash(commit),
+	}); err != nil && !strings.Contains(err.Error(), "already up-to-date") {
 		return err
 	}
 
@@ -465,7 +529,55 @@ func (a *analysis) checkout(cloneURL, repo, commit string) error {
 	return nil
 }
 
+type goListNode struct {
+	pkgName packageInfo
+	next    []*goListNode
+}
+type functionInfo struct {
+	importPath   string
+	functionName string
+}
+
+func printGraph(root *goListNode, pathStr string) {
+	if len(root.next) == 0 {
+		fmt.Println(pathStr)
+		return
+	} else {
+		for _, v := range root.next {
+			printGraph(v, pathStr+"<-"+root.pkgName.importPath)
+		}
+	}
+}
+func dfs(root *goListNode, goList *map[packageInfo]map[string]struct{}, s string, done map[packageInfo]struct{}, goListNodeMap map[packageInfo]*goListNode) {
+	if _, ok := done[root.pkgName]; ok {
+		return
+	}
+	for k, v := range *goList {
+		if _, ok := v[root.pkgName.importPath]; ok {
+			root.next = append(root.next, goListNodeMap[k])
+		}
+
+	}
+
+	var list string
+	for _, v := range root.next {
+		list += v.pkgName.importPath + ", "
+	}
+	// fmt.Printf("%v was imported by {%v}\n", root.pkgName, list)
+	for _, v := range root.next {
+		if _, ok := done[v.pkgName]; ok {
+			continue
+		}
+		// fmt.Printf("%v was imported by %v\n", root.pkgName, v.pkgName)
+		// fmt.Printf("%v call dfs for %v\n", root.pkgName, v.pkgName)
+		dfs(v, goList, s+"<-"+root.pkgName.importPath, done, goListNodeMap)
+	}
+	// fmt.Println(s)
+	done[root.pkgName] = struct{}{}
+}
+
 func (a *analysis) parseInfluencePackages() error {
+	a.goList = make(map[packageInfo]map[string]struct{})
 	cmd := exec.Command("go", "list", "-f", "\"{{.ImportPath}} {{.Imports}}\"", "./...")
 	var out strings.Builder
 	cmd.Stdout = &out
@@ -473,8 +585,6 @@ func (a *analysis) parseInfluencePackages() error {
 	if err != nil {
 		return err
 	}
-	a.influencePackages = make(map[packageInfo]struct{})
-	//log.Info("go list all import package", zap.String("package list", out.String()))
 	lines := strings.Split(out.String(), "\n")
 	for _, line := range lines {
 		if len(line) == 0 {
@@ -484,25 +594,34 @@ func (a *analysis) parseInfluencePackages() error {
 		matches := re.FindStringSubmatch(line[1 : len(line)-1])
 		if len(matches) > 0 {
 			url := matches[1]
+			if strings.Contains(url, "mock") {
+				continue
+			}
 			pkgName := strings.Split(url, "/")[len(strings.Split(url, "/"))-1]
 			importPkgPaths := strings.Split(matches[2][1:len(matches[2])-1], " ")
-			if pkgName == "tidb-server" {
+			if pkgName == "tidb-server" || pkgName == "dumpling" || pkgName == "tidb-lightning" {
 				pkgName = "main"
 			}
+			pkgName = getPkgName(url)
+			a.goList[packageInfo{pkgName: pkgName, importPath: url}] = make(map[string]struct{})
 			for _, importPkgPath := range importPkgPaths {
-				for k := range a.modifyPackages {
-					if k.importPath == importPkgPath {
-						if _, ok := a.influencePackages[packageInfo{pkgName: pkgName, importPath: url}]; ok {
-							log.Info("duplicate influence package", zap.String("url", url), zap.String("pkg pkgName", pkgName), zap.String("cause pkg", importPkgPath))
-						} else {
-							log.Info("potential influence package", zap.String("url", url), zap.String("pkg pkgName", pkgName), zap.String("cause pkg", importPkgPath))
-							a.influencePackages[packageInfo{pkgName: pkgName, importPath: url}] = struct{}{}
-						}
-					}
-				}
+				a.goList[packageInfo{pkgName: pkgName, importPath: url}][importPkgPath] = struct{}{}
 			}
 		}
 	}
+
+	a.influencePackagesRoot = &goListNode{pkgName: packageInfo{pkgName: "root", importPath: "root"}, next: []*goListNode{}}
+	done := make(map[packageInfo]struct{})
+	goListNodeMap := make(map[packageInfo]*goListNode)
+	for k := range a.goList {
+		goListNodeMap[k] = &goListNode{pkgName: k, next: []*goListNode{}}
+	}
+	for k := range Analysis.modifyPackages {
+		a.influencePackagesRoot.next = append(a.influencePackagesRoot.next, goListNodeMap[k])
+	}
+	dfs(a.influencePackagesRoot, &a.goList, "", done, goListNodeMap)
+	fmt.Println("------------")
+	// printGraph(&root, "")
 	return nil
 }
 
@@ -519,6 +638,16 @@ func (a *analysis) parsePR(urlStr, repo string) error {
 		return err
 	}
 	cloneURL, commit := *details.Head.Repo.CloneURL, *details.Head.SHA
+	a.prCommit = commit
+	done, err := commitAnalyzeDone(*details.Head.Label, commit)
+	if err != nil {
+		return err
+	}
+	if done && !*dryRun {
+		return errors.New("commit have analyze")
+	} else {
+		DbExecuteWithoutLog(context.Background(), "insert into done_pr (url, branch, bot) value(?, ?)", url, *details.Head.Label, commit)
+	}
 	if err = a.checkout(cloneURL, repo, commit); err != nil {
 		return err
 	}
@@ -557,6 +686,10 @@ func (a *analysis) parsePR(urlStr, repo string) error {
 			importPath += s + "/"
 		}
 		importPath = importPath[:len(importPath)-1]
+		if strings.Contains(importPath, "mock") {
+			log.Warn("detect mock package", zap.String("path", importPath))
+			continue
+		}
 		if pkgName == "tidb-server" {
 			pkgName = "main"
 		}

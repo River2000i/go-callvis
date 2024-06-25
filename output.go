@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	_ "github.com/go-sql-driver/mysql"
+
 	"golang.org/x/tools/go/callgraph"
 	"golang.org/x/tools/go/ssa"
 )
@@ -189,14 +191,14 @@ func printOutput(
 			// limit path prefixes
 			if len(limitPaths) > 0 &&
 				(!inLimits(caller) || !inLimits(callee)) {
-				logf("NOT in limit: %s -> %s", caller, callee)
+				//logf("NOT in limit: %s -> %s", caller, callee)
 				return nil
 			}
 
 			// ignore path prefixes
 			if len(ignorePaths) > 0 &&
 				(inIgnores(caller) || inIgnores(callee)) {
-				logf("IS ignored: %s -> %s", caller, callee)
+				//logf("IS ignored: %s -> %s", caller, callee)
 				return nil
 			}
 		}
@@ -204,22 +206,49 @@ func printOutput(
 		//var buf bytes.Buffer
 		//data, _ := json.MarshalIndent(caller.Func, "", " ")
 		//logf("call node: %s -> %s\n %v", caller, callee, string(data))
-		ignore := true
-		for k, v := range Analysis.modifyPackages {
-			if strings.Contains(callee.Func.Pkg.String(), k.importPath) {
-				for _, function := range v.functions {
-					if strings.Contains(callee.String(), function) {
-						ignore = false
-						break
-					}
-				}
-				break
-			}
+		// if len(Analysis.influenceFunctions) > 0 {
+		// 	ignore := true
+		// 	for k, functions := range Analysis.influenceFunctions {
+		// 		if callee.Func.Pkg.Pkg.Path() == k.importPath {
+		// 			for functionName := range functions {
+		// 				if callee.Func.Name() == functionName {
+		// 					logf("call node: %s.(%s) -> %s.(%s)%v\n", caller.Func.Pkg.Pkg.Path(), caller.Func.Name(), callee.Func.Pkg.Pkg.Path(), callee.Func.Name(), filenameCaller)
+		// 					if _, ok := Analysis.funcInfo[functionInfo{importPath: caller.Func.Pkg.Pkg.Path(), functionName: caller.Func.Name()}]; !ok {
+		// 						Analysis.funcInfo[functionInfo{importPath: caller.Func.Pkg.Pkg.Path(), functionName: caller.Func.Name()}] = make(map[functionInfo]struct{})
+		// 					}
+		// 					if _, ok := Analysis.funcInfo[functionInfo{importPath: caller.Func.Pkg.Pkg.Path(), functionName: caller.Func.Name()}][functionInfo{importPath: callee.Func.Pkg.Pkg.Path(), functionName: callee.Func.Name()}]; !ok {
+		// 						Analysis.funcInfo[functionInfo{importPath: caller.Func.Pkg.Pkg.Path(), functionName: caller.Func.Name()}][functionInfo{importPath: callee.Func.Pkg.Pkg.Path(), functionName: callee.Func.Name()}] = struct{}{}
+		// 					}
+		// 					ignore = false
+		// 					if _, ok := Analysis.influenceFunctions[k][caller.Func.Name()]; !ok {
+		// 						Analysis.influenceFunctions[k][caller.Func.Name()] = struct{}{}
+		// 					}
+		// 					break
+		// 				}
+		// 			}
+		// 		}
+		// 	}
+		// 	if ignore {
+		// 		return nil
+		// 	}
+		// } else {
+		// 	// logf("call node: %s.(%s) -> %s.(%s)%v\n", caller.Func.Pkg.Pkg.Path(), caller.Func.Name(), callee.Func.Pkg.Pkg.Path(), callee.Func.Name(), filenameCaller)
+		// 	if _, ok := Analysis.funcInfo[functionInfo{importPath: callee.Func.Pkg.Pkg.Path(), functionName: callee.Func.Name()}]; !ok {
+		// 		Analysis.funcInfo[functionInfo{importPath: callee.Func.Pkg.Pkg.Path(), functionName: callee.Func.Name()}] = make(map[functionInfo]struct{})
+		// 	}
+		// 	if _, ok := Analysis.funcInfo[functionInfo{importPath: callee.Func.Pkg.Pkg.Path(), functionName: callee.Func.Name()}][functionInfo{importPath: caller.Func.Pkg.Pkg.Path(), functionName: caller.Func.Name()}]; !ok {
+		// 		Analysis.funcInfo[functionInfo{importPath: callee.Func.Pkg.Pkg.Path(), functionName: callee.Func.Name()}][functionInfo{importPath: caller.Func.Pkg.Pkg.Path(), functionName: caller.Func.Name()}] = struct{}{}
+		// 	}
+		// }
+		if false {
+			logf("call node: %s.(%s) -> %s.(%s)%v\n", caller.Func.Pkg.Pkg.Path(), caller.Func.Name(), callee.Func.Pkg.Pkg.Path(), callee.Func.Name(), filenameCaller)
 		}
-		if ignore {
-			return nil
+		if _, ok := Analysis.funcInfo[functionInfo{importPath: callee.Func.Pkg.Pkg.Path(), functionName: callee.Func.Name()}]; !ok {
+			Analysis.funcInfo[functionInfo{importPath: callee.Func.Pkg.Pkg.Path(), functionName: callee.Func.Name()}] = make(map[functionInfo]struct{})
 		}
-		logf("call node: %s -> %s (%s -> %s) %v\n", caller.Func.Pkg, callee.Func.Pkg, caller, callee, filenameCaller)
+		if _, ok := Analysis.funcInfo[functionInfo{importPath: callee.Func.Pkg.Pkg.Path(), functionName: callee.Func.Name()}][functionInfo{importPath: caller.Func.Pkg.Pkg.Path(), functionName: caller.Func.Name()}]; !ok {
+			Analysis.funcInfo[functionInfo{importPath: callee.Func.Pkg.Pkg.Path(), functionName: callee.Func.Name()}][functionInfo{importPath: caller.Func.Pkg.Pkg.Path(), functionName: caller.Func.Name()}] = struct{}{}
+		}
 
 		var sprintNode = func(node *callgraph.Node, isCaller bool) *dotNode {
 			// only once
