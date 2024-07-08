@@ -86,9 +86,12 @@ type analysis struct {
 	modifyPackages        map[packageInfo]modifyFunctions
 	influenceFunctions    map[packageInfo]map[string]struct{}
 	influencePackagesRoot *goListNode
+	prURL                 string
 	prCommit              string
 	goList                map[packageInfo]map[string]struct{}
 	funcInfo              map[functionInfo]map[functionInfo]struct{}
+	sql                   string
+	args                  []interface{}
 }
 
 type packageInfo struct {
@@ -617,7 +620,9 @@ func (a *analysis) parseInfluencePackages() error {
 		goListNodeMap[k] = &goListNode{pkgName: k, next: []*goListNode{}}
 	}
 	for k := range Analysis.modifyPackages {
-		a.influencePackagesRoot.next = append(a.influencePackagesRoot.next, goListNodeMap[k])
+		if _, ok := goListNodeMap[k]; ok {
+			a.influencePackagesRoot.next = append(a.influencePackagesRoot.next, goListNodeMap[k])
+		}
 	}
 	dfs(a.influencePackagesRoot, &a.goList, "", done, goListNodeMap)
 	fmt.Println("------------")
@@ -649,7 +654,12 @@ func (a *analysis) parsePR(urlStr, repo string) error {
 		DbExecuteWithoutLog(context.Background(), "insert into done_pr (url, branch, bot) value(?, ?)", url, *details.Head.Label, commit)
 	}
 	if err = a.checkout(cloneURL, repo, commit); err != nil {
-		return err
+		cloneURL, commit = *details.Head.Repo.CloneURL, *details.Base.SHA
+		a.prCommit = commit
+		DbExecuteWithoutLog(context.Background(), "insert into done_pr (url, branch, bot) value(?, ?)", url, *details.Head.Label, commit)
+		if err = a.checkout(cloneURL, repo, commit); err != nil {
+			return err
+		}
 	}
 	prString, err := ghdiff.GetPullRequestWithClient(context.TODO(), url, &ghClient)
 	if err != nil {

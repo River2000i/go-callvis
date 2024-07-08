@@ -203,43 +203,6 @@ func printOutput(
 			}
 		}
 
-		//var buf bytes.Buffer
-		//data, _ := json.MarshalIndent(caller.Func, "", " ")
-		//logf("call node: %s -> %s\n %v", caller, callee, string(data))
-		// if len(Analysis.influenceFunctions) > 0 {
-		// 	ignore := true
-		// 	for k, functions := range Analysis.influenceFunctions {
-		// 		if callee.Func.Pkg.Pkg.Path() == k.importPath {
-		// 			for functionName := range functions {
-		// 				if callee.Func.Name() == functionName {
-		// 					logf("call node: %s.(%s) -> %s.(%s)%v\n", caller.Func.Pkg.Pkg.Path(), caller.Func.Name(), callee.Func.Pkg.Pkg.Path(), callee.Func.Name(), filenameCaller)
-		// 					if _, ok := Analysis.funcInfo[functionInfo{importPath: caller.Func.Pkg.Pkg.Path(), functionName: caller.Func.Name()}]; !ok {
-		// 						Analysis.funcInfo[functionInfo{importPath: caller.Func.Pkg.Pkg.Path(), functionName: caller.Func.Name()}] = make(map[functionInfo]struct{})
-		// 					}
-		// 					if _, ok := Analysis.funcInfo[functionInfo{importPath: caller.Func.Pkg.Pkg.Path(), functionName: caller.Func.Name()}][functionInfo{importPath: callee.Func.Pkg.Pkg.Path(), functionName: callee.Func.Name()}]; !ok {
-		// 						Analysis.funcInfo[functionInfo{importPath: caller.Func.Pkg.Pkg.Path(), functionName: caller.Func.Name()}][functionInfo{importPath: callee.Func.Pkg.Pkg.Path(), functionName: callee.Func.Name()}] = struct{}{}
-		// 					}
-		// 					ignore = false
-		// 					if _, ok := Analysis.influenceFunctions[k][caller.Func.Name()]; !ok {
-		// 						Analysis.influenceFunctions[k][caller.Func.Name()] = struct{}{}
-		// 					}
-		// 					break
-		// 				}
-		// 			}
-		// 		}
-		// 	}
-		// 	if ignore {
-		// 		return nil
-		// 	}
-		// } else {
-		// 	// logf("call node: %s.(%s) -> %s.(%s)%v\n", caller.Func.Pkg.Pkg.Path(), caller.Func.Name(), callee.Func.Pkg.Pkg.Path(), callee.Func.Name(), filenameCaller)
-		// 	if _, ok := Analysis.funcInfo[functionInfo{importPath: callee.Func.Pkg.Pkg.Path(), functionName: callee.Func.Name()}]; !ok {
-		// 		Analysis.funcInfo[functionInfo{importPath: callee.Func.Pkg.Pkg.Path(), functionName: callee.Func.Name()}] = make(map[functionInfo]struct{})
-		// 	}
-		// 	if _, ok := Analysis.funcInfo[functionInfo{importPath: callee.Func.Pkg.Pkg.Path(), functionName: callee.Func.Name()}][functionInfo{importPath: caller.Func.Pkg.Pkg.Path(), functionName: caller.Func.Name()}]; !ok {
-		// 		Analysis.funcInfo[functionInfo{importPath: callee.Func.Pkg.Pkg.Path(), functionName: callee.Func.Name()}][functionInfo{importPath: caller.Func.Pkg.Pkg.Path(), functionName: caller.Func.Name()}] = struct{}{}
-		// 	}
-		// }
 		if false {
 			logf("call node: %s.(%s) -> %s.(%s)%v\n", caller.Func.Pkg.Pkg.Path(), caller.Func.Name(), callee.Func.Pkg.Pkg.Path(), callee.Func.Name(), filenameCaller)
 		}

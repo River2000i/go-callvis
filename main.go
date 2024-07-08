@@ -2,8 +2,10 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
+	"go.uber.org/zap"
 	"go/build"
 	"log"
 	"net"
@@ -13,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	logutil "github.com/pingcap/log"
 	"github.com/pkg/browser"
 	"golang.org/x/tools/go/buildutil"
 )
@@ -92,7 +95,7 @@ func openBrowser(url string) {
 	}
 }
 
-func outputDot(fname string, outputFormat string) {
+func outputDot(fname string, outputFormat string, skipOutput bool) {
 	// get cmdline default for analysis
 	Analysis.OptsSetup()
 
@@ -105,7 +108,10 @@ func outputDot(fname string, outputFormat string) {
 		log.Printf("%v\n", err)
 		return
 	}
-	return
+	if skipOutput {
+		return
+	}
+
 	log.Println("writing dot output..")
 
 	writeErr := os.WriteFile(fmt.Sprintf("%s.gv", fname), output, 0755)
@@ -125,7 +131,21 @@ func callEdgeDFS(funcInfo functionInfo, set map[functionInfo]struct{}, s string)
 	if callerFuncs, ok := Analysis.funcInfo[funcInfo]; ok {
 		for k := range callerFuncs {
 			if _, ok := set[k]; ok {
-				logf("%s", s)
+				if len(Analysis.sql) == 0 {
+					Analysis.sql = "insert into call_graph_analyzer (prURL, pr_commit, caller, chain) value(?, ?, ?, ?)"
+				} else {
+					Analysis.sql += ",(?, ?, ?, ?)"
+				}
+				Analysis.args = append(Analysis.args, Analysis.prURL, Analysis.prCommit, k.importPath, s)
+				if len(Analysis.args) > 400 {
+					if _, err := DbExecuteWithoutLog(context.Background(), Analysis.sql, Analysis.args...); err != nil {
+						logutil.Error("record fail", zap.Error(err))
+					}
+					Analysis.sql = ""
+					Analysis.args = []interface{}{}
+				}
+
+				logutil.Info("edge end", zap.String("edge", s))
 				continue
 			}
 			set[k] = struct{}{}
@@ -133,7 +153,19 @@ func callEdgeDFS(funcInfo functionInfo, set map[functionInfo]struct{}, s string)
 			delete(set, k)
 		}
 	} else {
-		logf("%s", s)
+		if len(Analysis.sql) == 0 {
+			Analysis.sql = "insert into call_graph_analyzer (prURL, pr_commit, caller, chain) value(?, ?, ?, ?)"
+		} else {
+			Analysis.sql += ",(?, ?, ?, ?)"
+		}
+		Analysis.args = append(Analysis.args, Analysis.prURL, Analysis.prCommit, funcInfo.importPath, s)
+
+		if _, err := DbExecuteWithoutLog(context.Background(), Analysis.sql, Analysis.args...); err != nil {
+			logf("record fail err:%v", err)
+		}
+		Analysis.sql = ""
+		Analysis.args = []interface{}{}
+		logutil.Info("edge end", zap.String("edge", s))
 		return
 	}
 }
@@ -164,6 +196,7 @@ func main() {
 	Analysis.influenceFunctions = make(map[packageInfo]map[string]struct{})
 	Analysis.funcInfo = make(map[functionInfo]map[functionInfo]struct{})
 	if *prURL != "" {
+		Analysis.prURL = *prURL
 		if err := Analysis.parsePR(*prURL, *repo); err != nil {
 			log.Fatal(err)
 		}
@@ -205,14 +238,22 @@ func main() {
 			}
 			queue = queue[length:]
 		}
-		// args = []string{"github.com/pingcap/tidb/pkg/meta", "github.com/pingcap/tidb/pkg/ddl"}
-		if err := Analysis.DoAnalysis(CallGraphType(*callgraphAlgo), "", tests, args); err != nil {
+		pkgs := ""
+		for _, arg := range args {
+			pkgs = fmt.Sprintf("%s,%s", pkgs, arg)
+		}
+		if len(pkgs) > 0 {
+			log.Printf("analyze packages list[%s]", pkgs[1:])
+		}
+
+		if err := Analysis.DoAnalysis(CallGraphType(*callgraphAlgo), "",
+			tests, args); err != nil {
 			log.Fatal(err)
 		}
 
-		outputDot(time.Now().GoString(), *outputFormat)
+		outputDot(time.Now().GoString(), *outputFormat, true)
 		for k, v := range Analysis.funcInfo {
-			s := fmt.Sprintf("%s.(%s) contain: ", k.importPath, k.functionName)
+			s := fmt.Sprintf("%s.(%s) called by: ", k.importPath, k.functionName)
 			for k2 := range v {
 				s = fmt.Sprintf("%s, %s.(%s)", s, k2.importPath, k2.functionName)
 			}
@@ -242,7 +283,7 @@ func main() {
 				log.Fatal(err)
 			}
 		} else {
-			outputDot(*outputFile, *outputFormat)
+			outputDot(*outputFile, *outputFormat, false)
 		}
 	}
 }
