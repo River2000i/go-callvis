@@ -607,10 +607,10 @@ func (a *analysis) parseInfluencePackages() error {
 			}
 			pkgName := strings.Split(url, "/")[len(strings.Split(url, "/"))-1]
 			importPkgPaths := strings.Split(matches[2][1:len(matches[2])-1], " ")
-			if pkgName == "tidb-server" || pkgName == "dumpling" || pkgName == "tidb-lightning" {
-				pkgName = "main"
+			if pkgName, err = getPkgName(url); err != nil {
+				logf("get pkg name failure %v", err)
+				continue
 			}
-			pkgName = getPkgName(url)
 			a.goList[packageInfo{pkgName: pkgName, importPath: url}] = make(map[string]struct{})
 			for _, importPkgPath := range importPkgPaths {
 				a.goList[packageInfo{pkgName: pkgName, importPath: url}][importPkgPath] = struct{}{}
@@ -703,6 +703,9 @@ func (a *analysis) parsePR(urlStr, repo string) error {
 		importPath = importPath[:len(importPath)-1]
 		if strings.Contains(importPath, "mock") {
 			log.Warn("detect mock package", zap.String("path", importPath))
+			continue
+		} else if strings.Contains(importPath, "test") {
+			log.Warn("detect test package", zap.String("path", importPath))
 			continue
 		}
 		if pkgName == "tidb-server" {

@@ -7,12 +7,12 @@ import (
 	"fmt"
 	"go.uber.org/zap"
 	"go/build"
+	"golang.org/x/tools/go/packages"
 	"log"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
-	"strings"
 	"time"
 
 	logutil "github.com/pingcap/log"
@@ -288,10 +288,15 @@ func main() {
 	}
 }
 
-func getPkgName(importPath string) string {
-	pkgName := strings.Split(importPath, "/")[len(strings.Split(importPath, "/"))-1]
-	if pkgName == "tidb-server" || pkgName == "dumpling" || pkgName == "tidb-lightning" {
-		pkgName = "main"
+func getPkgName(importPath string) (string, error) {
+	cfg := &packages.Config{
+		Mode:       packages.NeedName,
+		BuildFlags: getBuildFlags(),
 	}
-	return pkgName
+
+	initial, err := packages.Load(cfg, importPath)
+	if err != nil {
+		return "", err
+	}
+	return initial[0].Name, nil
 }
