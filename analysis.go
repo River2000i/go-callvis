@@ -487,7 +487,7 @@ func hash(s string) string {
 }
 
 func (a *analysis) checkout(cloneURL, repo, commit string) error {
-	r, err := git.PlainOpen(".")
+	r, err := git.PlainOpenWithOptions(".", &git.PlainOpenOptions{DetectDotGit: true})
 	if err != nil {
 		return err
 	}
