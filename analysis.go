@@ -515,6 +515,11 @@ func (a *analysis) checkout(cloneURL, repo, commit string) error {
 	if err != nil {
 		return err
 	}
+	if err = w.Reset(&git.ResetOptions{
+		Mode: git.HardReset,
+	}); err != nil {
+		return err
+	}
 
 	logf("git checkout %s", commit)
 	err = w.Checkout(&git.CheckoutOptions{
@@ -528,7 +533,7 @@ func (a *analysis) checkout(cloneURL, repo, commit string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Println(ref.Hash())
+	fmt.Println("current head hash: ", ref.Hash())
 	return nil
 }
 
