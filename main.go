@@ -240,6 +240,11 @@ func main() {
 			}
 			queue = queue[length:]
 		}
+		if len(args) == 0 {
+			for k := range Analysis.goList {
+				args = append(args, k.importPath)
+			}
+		}
 		pkgs := ""
 		for _, arg := range args {
 			pkgs = fmt.Sprintf("%s,%s", pkgs, arg)
