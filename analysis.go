@@ -635,7 +635,7 @@ func (a *analysis) parseInfluencePackages() error {
 	return nil
 }
 
-func (a *analysis) parsePR(urlStr, repo string) error {
+func (a *analysis) parsePR(urlStr, repo, commit string) error {
 	url, _ := ghdiff.ParsePullRequestURL(urlStr)
 	client := github.NewClient(nil)
 	githubToken := os.Getenv("GITHUB_TOKEN")
@@ -647,9 +647,12 @@ func (a *analysis) parsePR(urlStr, repo string) error {
 	if err != nil {
 		return err
 	}
-	cloneURL, commit := *details.Head.Repo.CloneURL, *details.Head.SHA
-	a.prCommit = commit
-	done, err := commitAnalyzeDone(*details.Head.Label, commit)
+	cloneURL, prCommit := *details.Head.Repo.CloneURL, *details.Head.SHA
+	if len(commit) != 0 {
+		prCommit = commit
+	}
+	a.prCommit = prCommit
+	done, err := commitAnalyzeDone(*details.Head.Label, prCommit)
 	if err != nil {
 		return err
 	}
@@ -658,11 +661,11 @@ func (a *analysis) parsePR(urlStr, repo string) error {
 	} else {
 		DbExecuteWithoutLog(context.Background(), "insert into done_pr (url, branch, bot) value(?, ?)", url, *details.Head.Label, commit)
 	}
-	if err = a.checkout(cloneURL, repo, commit); err != nil {
-		cloneURL, commit = *details.Head.Repo.CloneURL, *details.Base.SHA
-		a.prCommit = commit
+	if err = a.checkout(cloneURL, repo, prCommit); err != nil {
+		cloneURL, prCommit = *details.Head.Repo.CloneURL, *details.Base.SHA
+		a.prCommit = prCommit
 		DbExecuteWithoutLog(context.Background(), "insert into done_pr (url, branch, bot) value(?, ?)", url, *details.Head.Label, commit)
-		if err = a.checkout(cloneURL, repo, commit); err != nil {
+		if err = a.checkout(cloneURL, repo, prCommit); err != nil {
 			return err
 		}
 	}

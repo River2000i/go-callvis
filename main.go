@@ -55,6 +55,7 @@ var (
 	prURL       = flag.String("prURL", "", "github pr url")
 	repo        = flag.String("repo", "", "github repo pkgName")
 	dryRun      = flag.Bool("dryRun", false, "dry run")
+	commitHash  = flag.String("commit", "", "commit hash")
 )
 
 func init() {
@@ -190,6 +191,7 @@ func main() {
 	args := flag.Args()
 	tests := *testFlag
 	httpAddr := *httpFlag
+	checkoutCommit := *commitHash
 	urlAddr := parseHTTPAddr(httpAddr)
 
 	Analysis = new(analysis)
@@ -197,7 +199,7 @@ func main() {
 	Analysis.funcInfo = make(map[functionInfo]map[functionInfo]struct{})
 	if *prURL != "" {
 		Analysis.prURL = *prURL
-		if err := Analysis.parsePR(*prURL, *repo); err != nil {
+		if err := Analysis.parsePR(*prURL, *repo, checkoutCommit); err != nil {
 			log.Fatal(err)
 		}
 		if err := Analysis.parseInfluencePackages(); err != nil {
