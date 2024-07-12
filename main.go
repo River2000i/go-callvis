@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 	"time"
 
 	logutil "github.com/pingcap/log"
@@ -264,7 +265,10 @@ func main() {
 			for k2 := range v {
 				s = fmt.Sprintf("%s, %s.(%s)", s, k2.importPath, k2.functionName)
 			}
-			fmt.Println(s)
+			if strings.Contains(s, "tidb") {
+				fmt.Println(s)
+			}
+
 		}
 
 		for k, functions := range Analysis.influenceFunctions {
