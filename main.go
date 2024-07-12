@@ -248,7 +248,7 @@ func main() {
 			}
 			for k := range Analysis.modifyPackages {
 				args = append(args, k.importPath)
-				cmd := exec.Command("go", "get", k.importPath)
+				cmd := exec.Command("go", "get", "-u", k.importPath)
 				var out, stderr strings.Builder
 				cmd.Stdout = &out
 				cmd.Stderr = &stderr
