@@ -244,7 +244,6 @@ func main() {
 			for k := range Analysis.goList {
 				args = append(args, k.importPath)
 			}
-			args = append(args, "github.com/pingcap/tidb")
 		}
 		pkgs := ""
 		for _, arg := range args {
