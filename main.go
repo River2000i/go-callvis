@@ -13,8 +13,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"os/exec"
-	"strings"
 	"time"
 
 	logutil "github.com/pingcap/log"
@@ -246,16 +244,7 @@ func main() {
 			for k := range Analysis.goList {
 				args = append(args, k.importPath)
 			}
-			for k := range Analysis.modifyPackages {
-				args = append(args, k.importPath)
-				cmd := exec.Command("go", "get", "-u", k.importPath)
-				var out, stderr strings.Builder
-				cmd.Stdout = &out
-				cmd.Stderr = &stderr
-				if err := cmd.Run(); err != nil {
-					log.Println("go get failure. path: ", k.importPath)
-				}
-			}
+			args = append(args, "github.com/pingcap/tidb")
 		}
 		pkgs := ""
 		for _, arg := range args {
