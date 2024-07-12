@@ -244,6 +244,9 @@ func main() {
 			for k := range Analysis.goList {
 				args = append(args, k.importPath)
 			}
+			for k := range Analysis.modifyPackages {
+				args = append(args, k.importPath)
+			}
 		}
 		pkgs := ""
 		for _, arg := range args {
