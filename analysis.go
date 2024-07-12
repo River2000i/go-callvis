@@ -682,7 +682,8 @@ func (a *analysis) parsePR(urlStr, repo, commit string) error {
 		functions := parseDiffContentsGetModifyFunctions(diffFile.DiffContents)
 		log.Info("parse diff contents get modify functions", zap.Strings("functions", functions))
 		fset := token.NewFileSet()
-		node, err2 := parser.ParseFile(fset, "./"+strings.TrimPrefix(diffFile.FilePathNew, "b/"), nil, parser.PackageClauseOnly)
+		fileName := "./" + strings.TrimPrefix(diffFile.FilePathNew, "b/")
+		node, err2 := parser.ParseFile(fset, fileName, nil, parser.PackageClauseOnly)
 		var pkgName string
 		if err2 != nil {
 			log.Warn("parse file get error", zap.Error(err2))
@@ -697,8 +698,8 @@ func (a *analysis) parsePR(urlStr, repo, commit string) error {
 		}
 
 		var importPath string
-		for i, s := range strings.Split("github.com/pingcap/"+repo+"/"+strings.TrimPrefix(diffFile.FilePathNew, "b/"), "/") {
-			if i == len(strings.Split("github.com/pingcap/"+repo+"/"+strings.TrimPrefix(diffFile.FilePathNew, "b/"), "/"))-1 {
+		for i, s := range strings.Split("github.com/pingcap/"+repo+"/pkg/"+strings.TrimPrefix(diffFile.FilePathNew, "b/"), "/") {
+			if i == len(strings.Split("github.com/pingcap/"+repo+"/pkg/"+strings.TrimPrefix(diffFile.FilePathNew, "b/"), "/"))-1 {
 				break
 			}
 			importPath += s + "/"
