@@ -697,8 +697,8 @@ func (a *analysis) parsePR(urlStr, repo, commit string) error {
 		}
 
 		var importPath string
-		for i, s := range strings.Split("github.com/pingcap/"+repo+"/"+strings.TrimPrefix(diffFile.FilePathNew, "b/"), "/") {
-			if i == len(strings.Split("github.com/pingcap/"+repo+"/"+strings.TrimPrefix(diffFile.FilePathNew, "b/"), "/"))-1 {
+		for i, s := range strings.Split("github.com/"+*details.Base.Repo.FullName+"/"+strings.TrimPrefix(diffFile.FilePathNew, "b/"), "/") {
+			if i == len(strings.Split("github.com/"+*details.Base.Repo.FullName+"/"+strings.TrimPrefix(diffFile.FilePathNew, "b/"), "/"))-1 {
 				break
 			}
 			importPath += s + "/"
