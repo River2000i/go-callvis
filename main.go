@@ -138,9 +138,9 @@ func callEdgeDFS(funcInfo functionInfo, set map[functionInfo]struct{}, s string)
 				} else {
 					Analysis.sql += ",(?, ?, ?, ?, ?)"
 				}
-				isModifyPkg := "false"
+				isModifyPkg := 0
 				if _, ok = Analysis.modifyPackages[packageInfo{pkgName: strings.Split(k.importPath, "/")[len(strings.Split(k.importPath, "/"))-1]}]; ok {
-					isModifyPkg = "true"
+					isModifyPkg = 1
 				}
 				Analysis.args = append(Analysis.args, Analysis.prURL, Analysis.prCommit, k.importPath, isModifyPkg, s)
 				if len(Analysis.args) > 400 {
@@ -164,9 +164,9 @@ func callEdgeDFS(funcInfo functionInfo, set map[functionInfo]struct{}, s string)
 		} else {
 			Analysis.sql += ",(?, ?, ?, ?, ?)"
 		}
-		isModifyPkg := "false"
+		isModifyPkg := 0
 		if _, ok = Analysis.modifyPackages[packageInfo{pkgName: strings.Split(funcInfo.importPath, "/")[len(strings.Split(funcInfo.importPath, "/"))-1]}]; ok {
-			isModifyPkg = "true"
+			isModifyPkg = 1
 		}
 		Analysis.args = append(Analysis.args, Analysis.prURL, Analysis.prCommit, funcInfo.importPath, isModifyPkg, s)
 
