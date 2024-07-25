@@ -134,11 +134,15 @@ func callEdgeDFS(funcInfo functionInfo, set map[functionInfo]struct{}, s string)
 		for k := range callerFuncs {
 			if _, ok := set[k]; ok {
 				if len(Analysis.sql) == 0 {
-					Analysis.sql = "insert into call_graph_analyzer (prURL, pr_commit, caller, chain) value(?, ?, ?, ?)"
+					Analysis.sql = "insert into call_graph_analyzer (prURL, pr_commit, caller, modify_pkg, chain) value(?, ?, ?, ?, ?)"
 				} else {
-					Analysis.sql += ",(?, ?, ?, ?)"
+					Analysis.sql += ",(?, ?, ?, ?, ?)"
 				}
-				Analysis.args = append(Analysis.args, Analysis.prURL, Analysis.prCommit, k.importPath, s)
+				isModifyPkg := "false"
+				if _, ok = Analysis.modifyPackages[packageInfo{pkgName: strings.Split(k.importPath, "/")[len(strings.Split(k.importPath, "/"))-1]}]; ok {
+					isModifyPkg = "true"
+				}
+				Analysis.args = append(Analysis.args, Analysis.prURL, Analysis.prCommit, k.importPath, isModifyPkg, s)
 				if len(Analysis.args) > 400 {
 					if _, err := DbExecuteWithoutLog(context.Background(), Analysis.sql, Analysis.args...); err != nil {
 						logutil.Error("record fail", zap.Error(err))
@@ -156,11 +160,15 @@ func callEdgeDFS(funcInfo functionInfo, set map[functionInfo]struct{}, s string)
 		}
 	} else {
 		if len(Analysis.sql) == 0 {
-			Analysis.sql = "insert into call_graph_analyzer (prURL, pr_commit, caller, chain) value(?, ?, ?, ?)"
+			Analysis.sql = "insert into call_graph_analyzer (prURL, pr_commit, caller, modify_pkg, chain) value(?, ?, ?, ?, ?)"
 		} else {
-			Analysis.sql += ",(?, ?, ?, ?)"
+			Analysis.sql += ",(?, ?, ?, ?, ?)"
 		}
-		Analysis.args = append(Analysis.args, Analysis.prURL, Analysis.prCommit, funcInfo.importPath, s)
+		isModifyPkg := "false"
+		if _, ok = Analysis.modifyPackages[packageInfo{pkgName: strings.Split(funcInfo.importPath, "/")[len(strings.Split(funcInfo.importPath, "/"))-1]}]; ok {
+			isModifyPkg = "true"
+		}
+		Analysis.args = append(Analysis.args, Analysis.prURL, Analysis.prCommit, funcInfo.importPath, isModifyPkg, s)
 
 		if _, err := DbExecuteWithoutLog(context.Background(), Analysis.sql, Analysis.args...); err != nil {
 			logf("record fail err:%v", err)
