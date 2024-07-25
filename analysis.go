@@ -485,7 +485,7 @@ func hash(s string) string {
 	return strconv.FormatUint(uint64(h.Sum32()), 10)
 }
 
-func (a *analysis) checkout(branch, commit string) error {
+func (a *analysis) checkout(branch string) error {
 	r, err := git.PlainOpenWithOptions(".", &git.PlainOpenOptions{DetectDotGit: true})
 	if err != nil {
 		return err
@@ -515,8 +515,8 @@ func (a *analysis) checkout(branch, commit string) error {
 		log.Error("git hard reset failure", zap.Error(err))
 		return err
 	}
-
-	if err = w.Checkout(&git.CheckoutOptions{Branch: plumbing.NewBranchReferenceName(fmt.Sprintf("origin/%s", branch))}); err != nil {
+	//refs/remotes/origin/release-7.5
+	if err = w.Checkout(&git.CheckoutOptions{Branch: plumbing.NewRemoteReferenceName("origin", branch)}); err != nil {
 		log.Error("git checkout failure", zap.Error(err))
 		return err
 	}
@@ -644,23 +644,17 @@ func (a *analysis) parsePR(urlStr, repo, commit string) error {
 		prCommit = commit
 	}
 	a.prCommit = prCommit
-	done, err := commitAnalyzeDone(*details.Head.Label, prCommit)
+	done, err := commitAnalyzeDone(*details.Base.Label, prCommit)
 	if err != nil {
 		return err
 	}
 	if done && !*dryRun {
 		return errors.New("commit have analyze")
 	}
-	if err = a.checkout(*details.Head.Label, prCommit); err != nil {
-		prCommit = *details.Base.SHA
-		a.prCommit = prCommit
-		if err = a.checkout(*details.Base.Label, prCommit); err != nil {
-			return err
-		} else {
-			DbExecuteWithoutLog(context.Background(), "insert into done_pr (url, branch, bot) value(?, ?)", url, *details.Base.Label, commit)
-		}
+	if err = a.checkout(*details.Base.Ref); err != nil {
+		return err
 	} else {
-		DbExecuteWithoutLog(context.Background(), "insert into done_pr (url, branch, bot) value(?, ?)", url, *details.Head.Label, commit)
+		DbExecuteWithoutLog(context.Background(), "insert into done_pr (url, branch, bot) value(?, ?)", url, *details.Base.Label, commit)
 	}
 	prString, err := ghdiff.GetPullRequestWithClient(context.TODO(), url, &ghClient)
 	if err != nil {
