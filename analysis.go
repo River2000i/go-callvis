@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"github.com/go-git/go-git/v5/plumbing"
 	"go/build"
 	"go/parser"
 	"go/token"
@@ -20,8 +21,6 @@ import (
 	"strings"
 
 	"github.com/go-git/go-git/v5"
-	"github.com/go-git/go-git/v5/config"
-	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/google/go-github/v57/github"
 	ghdiff "github.com/kmesiab/go-github-diff"
 	"github.com/pingcap/log"
@@ -486,7 +485,7 @@ func hash(s string) string {
 	return strconv.FormatUint(uint64(h.Sum32()), 10)
 }
 
-func (a *analysis) checkout(cloneURL, repo, commit string) error {
+func (a *analysis) checkout(branch, commit string) error {
 	r, err := git.PlainOpenWithOptions(".", &git.PlainOpenOptions{DetectDotGit: true})
 	if err != nil {
 		return err
@@ -498,16 +497,13 @@ func (a *analysis) checkout(cloneURL, repo, commit string) error {
 		return err
 	}
 	logf("git head ref %v", ref.Hash())
-
-	if _, err = r.CreateRemote(&config.RemoteConfig{
-		Name: hash(commit),
-		URLs: []string{cloneURL},
-	}); err != nil {
-		logf("create remote failue since %v", err)
+	remote, err := r.Remote("origin")
+	if err == git.ErrRemoteNotFound {
+		log.Warn("get origin remote failure")
+		return err
 	}
-	if err := r.Fetch(&git.FetchOptions{
-		RemoteName: hash(commit),
-	}); err != nil && !strings.Contains(err.Error(), "already up-to-date") {
+	if err = remote.Fetch(&git.FetchOptions{}); err != nil {
+		log.Warn("fetch origin remote failure")
 		return err
 	}
 
@@ -523,7 +519,7 @@ func (a *analysis) checkout(cloneURL, repo, commit string) error {
 
 	logf("git checkout %s", commit)
 	err = w.Checkout(&git.CheckoutOptions{
-		Hash: plumbing.NewHash(commit),
+		Branch: plumbing.NewBranchReferenceName(fmt.Sprintf("origin/%s", branch)),
 	})
 	if err != nil {
 		return err
@@ -533,7 +529,7 @@ func (a *analysis) checkout(cloneURL, repo, commit string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Println("current head hash: ", ref.Hash())
+	log.Info("git head hash", zap.Any("sha", ref.Hash()))
 	return nil
 }
 
@@ -647,7 +643,7 @@ func (a *analysis) parsePR(urlStr, repo, commit string) error {
 	if err != nil {
 		return err
 	}
-	cloneURL, prCommit := *details.Head.Repo.CloneURL, *details.Head.SHA
+	prCommit := *details.Head.SHA
 	if len(commit) != 0 {
 		prCommit = commit
 	}
@@ -658,16 +654,17 @@ func (a *analysis) parsePR(urlStr, repo, commit string) error {
 	}
 	if done && !*dryRun {
 		return errors.New("commit have analyze")
+	}
+	if err = a.checkout(*details.Head.Label, prCommit); err != nil {
+		prCommit = *details.Base.SHA
+		a.prCommit = prCommit
+		if err = a.checkout(*details.Base.Label, prCommit); err != nil {
+			return err
+		} else {
+			DbExecuteWithoutLog(context.Background(), "insert into done_pr (url, branch, bot) value(?, ?)", url, *details.Base.Label, commit)
+		}
 	} else {
 		DbExecuteWithoutLog(context.Background(), "insert into done_pr (url, branch, bot) value(?, ?)", url, *details.Head.Label, commit)
-	}
-	if err = a.checkout(cloneURL, repo, prCommit); err != nil {
-		cloneURL, prCommit = *details.Head.Repo.CloneURL, *details.Base.SHA
-		a.prCommit = prCommit
-		DbExecuteWithoutLog(context.Background(), "insert into done_pr (url, branch, bot) value(?, ?)", url, *details.Head.Label, commit)
-		if err = a.checkout(cloneURL, repo, prCommit); err != nil {
-			return err
-		}
 	}
 	prString, err := ghdiff.GetPullRequestWithClient(context.TODO(), url, &ghClient)
 	if err != nil {
