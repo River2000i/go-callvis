@@ -232,16 +232,8 @@ func main() {
 			length := len(set)
 			for _, pkg := range queue {
 				if _, ok := set[pkg.pkgName.importPath]; !ok {
-					cfg := &packages.Config{
-						Mode:       packages.LoadAllSyntax,
-						Tests:      tests,
-						Dir:        "",
-						BuildFlags: getBuildFlags(),
-					}
-					if _, err := packages.Load(cfg, args...); err != nil {
-						args = append(args, pkg.pkgName.importPath)
-						set[pkg.pkgName.importPath] = struct{}{}
-					}
+					args = append(args, pkg.pkgName.importPath)
+					set[pkg.pkgName.importPath] = struct{}{}
 				}
 			}
 			if length == len(set) {
@@ -259,17 +251,7 @@ func main() {
 		}
 		if len(args) == 0 {
 			for k := range Analysis.goList {
-				cfg := &packages.Config{
-					Mode:       packages.LoadAllSyntax,
-					Tests:      tests,
-					Dir:        "",
-					BuildFlags: getBuildFlags(),
-				}
-				if _, err := packages.Load(cfg, k.importPath); err == nil {
-					args = append(args, k.importPath)
-				} else {
-					log.Printf("load package error pkg: %v, err: %v", k.importPath, err)
-				}
+				args = append(args, k.importPath)
 			}
 		}
 		pkgs := ""
