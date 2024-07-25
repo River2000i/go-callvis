@@ -274,7 +274,7 @@ func main() {
 				s = fmt.Sprintf("%s, %s.(%s)", s, k2.importPath, k2.functionName)
 			}
 			if strings.Contains(s, "tidb") {
-				fmt.Println(s)
+				logf(s)
 			}
 		}
 
