@@ -510,20 +510,16 @@ func (a *analysis) checkout(branch, commit string) error {
 	if err != nil {
 		return err
 	}
-	if err = w.Reset(&git.ResetOptions{
-		Mode: git.HardReset,
-	}); err != nil {
+	if err = w.Reset(&git.ResetOptions{Mode: git.HardReset}); err != nil {
+		log.Warn("git hard reset failure", zap.Error(err))
 		return err
 	}
 
-	logf("git checkout %s", commit)
-	err = w.Checkout(&git.CheckoutOptions{
-		Branch: plumbing.NewBranchReferenceName(fmt.Sprintf("origin/%s", branch)),
-	})
-	if err != nil {
+	if err = w.Checkout(&git.CheckoutOptions{Branch: plumbing.NewBranchReferenceName(fmt.Sprintf("origin/%s", branch))}); err != nil {
+		log.Warn("git checkout failure", zap.Error(err))
 		return err
 	}
-	logf("git show-ref --head HEAD")
+	log.Info("run `git show-ref --head HEAD`")
 	ref, err = r.Head()
 	if err != nil {
 		return err
