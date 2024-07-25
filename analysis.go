@@ -503,8 +503,7 @@ func (a *analysis) checkout(branch, commit string) error {
 		return err
 	}
 	if err = remote.Fetch(&git.FetchOptions{}); err != nil {
-		log.Warn("fetch origin remote failure")
-		return err
+		log.Warn("fetch origin remote failure", zap.Error(err))
 	}
 
 	w, err := r.Worktree()
