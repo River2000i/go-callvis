@@ -491,12 +491,12 @@ func (a *analysis) checkout(branch, commit string) error {
 		return err
 	}
 
-	logf("git show-ref --head HEAD")
+	log.Info("git show-ref --head HEAD")
 	ref, err := r.Head()
 	if err != nil {
 		return err
 	}
-	logf("git head ref %v", ref.Hash())
+	log.Info("git head ref", zap.Any("hash", ref.Hash()))
 	remote, err := r.Remote("origin")
 	if err == git.ErrRemoteNotFound {
 		log.Warn("get origin remote failure")
@@ -508,15 +508,16 @@ func (a *analysis) checkout(branch, commit string) error {
 
 	w, err := r.Worktree()
 	if err != nil {
+		log.Error("create worktree failure", zap.Error(err))
 		return err
 	}
 	if err = w.Reset(&git.ResetOptions{Mode: git.HardReset}); err != nil {
-		log.Warn("git hard reset failure", zap.Error(err))
+		log.Error("git hard reset failure", zap.Error(err))
 		return err
 	}
 
 	if err = w.Checkout(&git.CheckoutOptions{Branch: plumbing.NewBranchReferenceName(fmt.Sprintf("origin/%s", branch))}); err != nil {
-		log.Warn("git checkout failure", zap.Error(err))
+		log.Error("git checkout failure", zap.Error(err))
 		return err
 	}
 	log.Info("run `git show-ref --head HEAD`")
