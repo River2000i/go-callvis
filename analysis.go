@@ -661,7 +661,7 @@ func (a *analysis) parsePR(urlStr, repo, commit string) error {
 		log.Info("Error getting pull request", zap.Error(err))
 		return err
 	}
-	ignoreList := []string{".mod", "_test.go", ".bazel"}
+	ignoreList := []string{".mod", ".sum", "_test.go", ".bazel"}
 	diffFiles := ghdiff.ParseGitDiff(prString, ignoreList)
 	a.modifyPackages = make(map[packageInfo]modifyFunctions)
 	for _, diffFile := range diffFiles {
