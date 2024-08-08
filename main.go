@@ -213,6 +213,10 @@ func main() {
 		if err := Analysis.parsePR(*prURL, *repo, checkoutCommit); err != nil {
 			log.Fatal(err)
 		}
+		for k := range Analysis.modifyPackages {
+			DbExecuteWithoutLog(context.Background(), fmt.Sprintf("insert into call_graph_pr_modify_packages(prURL, modify_packages) value(%v, %v)", Analysis.prURL, k.importPath))
+		}
+
 		if err := Analysis.parseInfluencePackages(); err != nil {
 			log.Fatal(err)
 		}
