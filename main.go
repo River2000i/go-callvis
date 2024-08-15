@@ -214,7 +214,7 @@ func main() {
 			log.Fatal(err)
 		}
 		for k := range Analysis.modifyPackages {
-			DbExecuteWithoutLog(context.Background(), fmt.Sprintf("insert into call_graph_pr_modify_packages(prURL, modify_packages) value(%v, %v)", Analysis.prURL, k.importPath))
+			DbExecuteWithoutLog(context.Background(), "insert into call_graph_pr_modify_packages(prURL, modify_packages) value(?, ?)", Analysis.prURL, k.importPath)
 		}
 
 		if err := Analysis.parseInfluencePackages(); err != nil {
