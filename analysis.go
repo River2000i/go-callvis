@@ -633,7 +633,7 @@ func (a *analysis) parseInfluencePackages() error {
 func (a *analysis) parsePR(urlStr, repo, commit string) error {
 	// url = "tidb/master"
 	if strings.Contains(a.prURL, "/master") {
-		log.Info("parse master")
+		log.Info("parse master", zap.String("pr url", a.prURL))
 		if err := a.checkout(strings.Trim(a.prURL, repo+"/")); err != nil {
 			return err
 		}
