@@ -290,6 +290,15 @@ func main() {
 				callEdgeDFS(functionInfo{importPath: k.importPath, functionName: f}, set, fmt.Sprintf("%s.(%s)", k.importPath, f))
 			}
 		}
+		// dfs all functions in `Analysis.funcInfo`
+		if Analysis.prURL == "master" {
+			for k, functions := range Analysis.funcInfo {
+				for f := range functions {
+					set := make(map[functionInfo]struct{})
+					callEdgeDFS(functionInfo{importPath: k.importPath, functionName: f.functionName}, set, fmt.Sprintf("%s.(%s)", k.importPath, f))
+				}
+			}
+		}
 
 	} else {
 		if err := Analysis.DoAnalysis(CallGraphType(*callgraphAlgo), "", tests, args); err != nil {
