@@ -628,6 +628,11 @@ func (a *analysis) parseInfluencePackages() error {
 }
 
 func (a *analysis) parsePR(urlStr, repo, commit string) error {
+	if a.prURL == "master" {
+		log.Info("parse master")
+		a.prCommit = "master"
+		return nil
+	}
 	url, _ := ghdiff.ParsePullRequestURL(urlStr)
 	client := github.NewClient(nil)
 	githubToken := os.Getenv("GITHUB_TOKEN")
