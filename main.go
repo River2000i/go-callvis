@@ -291,7 +291,7 @@ func main() {
 			}
 		}
 		// dfs all functions in `Analysis.funcInfo`
-		if Analysis.prURL == "master" {
+		if strings.Contains(Analysis.prURL, "/master") {
 			for k, functions := range Analysis.funcInfo {
 				for f := range functions {
 					set := make(map[functionInfo]struct{})
