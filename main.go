@@ -144,7 +144,7 @@ func callEdgeDFS(funcInfo functionInfo, set map[functionInfo]struct{}, s string)
 					isModifyPkg = 1
 				}
 				Analysis.args = append(Analysis.args, Analysis.prURL, Analysis.prCommit, k.importPath, isModifyPkg, s)
-				if len(Analysis.args) > 400 {
+				if len(Analysis.args) > 2000 {
 					if _, err := DbExecuteWithoutLog(context.Background(), Analysis.sql, Analysis.args...); err != nil {
 						logutil.Error("record fail", zap.Error(err))
 					}

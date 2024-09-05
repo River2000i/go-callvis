@@ -526,6 +526,9 @@ func (a *analysis) checkout(branch string) error {
 		return err
 	}
 	log.Info("git head hash", zap.Any("sha", ref.Hash()))
+	if strings.Contains(a.prURL, "master") {
+		a.prCommit = ref.Hash().String()
+	}
 	return nil
 }
 
@@ -628,9 +631,12 @@ func (a *analysis) parseInfluencePackages() error {
 }
 
 func (a *analysis) parsePR(urlStr, repo, commit string) error {
-	if a.prURL == "master" {
+	// url = "tidb/master"
+	if strings.Contains(a.prURL, "/master") {
 		log.Info("parse master")
-		a.prCommit = "master"
+		if err := a.checkout(strings.Trim(a.prURL, repo+"/")); err != nil {
+			return err
+		}
 		return nil
 	}
 	url, _ := ghdiff.ParsePullRequestURL(urlStr)
