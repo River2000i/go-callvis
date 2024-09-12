@@ -152,7 +152,7 @@ func callEdgeDFS(funcInfo functionInfo, set map[functionInfo]struct{}, s string)
 					Analysis.args = []interface{}{}
 				}
 
-				logutil.Info("edge end", zap.String("edge", s))
+				//logutil.Info("edge end", zap.String("edge", s))
 				continue
 			}
 			set[k] = struct{}{}
@@ -177,7 +177,7 @@ func callEdgeDFS(funcInfo functionInfo, set map[functionInfo]struct{}, s string)
 		}
 		Analysis.sql = ""
 		Analysis.args = []interface{}{}
-		logutil.Info("edge end", zap.String("edge", s))
+		//logutil.Info("edge end", zap.String("edge", s))
 		return
 	}
 }
