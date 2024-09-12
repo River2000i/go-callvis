@@ -152,7 +152,6 @@ func printOutput(
 		posCallee := prog.Fset.Position(callee.Func.Pos())
 		posEdge := prog.Fset.Position(edge.Pos())
 		//fileCaller := fmt.Sprintf("%s:%d", posCaller.Filename, posCaller.Line)
-		filenameCaller := filepath.Base(posCaller.Filename)
 
 		// omit synthetic calls
 		if isSynthetic(edge) {
@@ -203,9 +202,6 @@ func printOutput(
 			}
 		}
 
-		if false {
-			logf("call node: %s.(%s) -> %s.(%s)%v\n", caller.Func.Pkg.Pkg.Path(), caller.Func.Name(), callee.Func.Pkg.Pkg.Path(), callee.Func.Name(), filenameCaller)
-		}
 		if _, ok := Analysis.funcInfo[functionInfo{importPath: callee.Func.Pkg.Pkg.Path(), functionName: callee.Func.Name()}]; !ok {
 			Analysis.funcInfo[functionInfo{importPath: callee.Func.Pkg.Pkg.Path(), functionName: callee.Func.Name()}] = make(map[functionInfo]struct{})
 		}

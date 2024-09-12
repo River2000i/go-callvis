@@ -631,6 +631,7 @@ func (a *analysis) parseInfluencePackages() error {
 }
 
 func (a *analysis) parsePR(urlStr, repo, commit string) error {
+	// master branch don't need to parse git diff
 	// url = "tidb/master"
 	if strings.Contains(a.prURL, "/master") {
 		log.Info("parse master", zap.String("pr url", a.prURL))
@@ -664,8 +665,6 @@ func (a *analysis) parsePR(urlStr, repo, commit string) error {
 	}
 	if err = a.checkout(*details.Base.Ref); err != nil {
 		return err
-	} else {
-		DbExecuteWithoutLog(context.Background(), "insert into done_pr (url, branch, bot) value(?, ?)", url, *details.Base.Label, commit)
 	}
 	prString, err := ghdiff.GetPullRequestWithClient(context.TODO(), url, &ghClient)
 	if err != nil {
